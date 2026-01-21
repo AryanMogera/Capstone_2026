@@ -1,0 +1,17 @@
+# STM32CubeIDE build outputs
+Debug/
+Release/
+**/*.elf
+**/*.map
+**/*.list
+**/*.o
+**/*.d
+**/*.su
+**/objects.list
+**/objects.mk
+**/sources.mk
+**/makefile
+
+# Eclipse / IDE metadata
+**/.settings/
+**/.metadata/
