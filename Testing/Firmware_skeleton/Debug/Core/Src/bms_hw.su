@@ -1,0 +1,6 @@
+../Core/Src/bms_hw.c:5:6:BMS_HW_Init	8	static
+../Core/Src/bms_hw.c:11:6:BMS_HW_SetChargeEnable	16	static
+../Core/Src/bms_hw.c:15:6:BMS_HW_SetDischargeEnable	16	static
+../Core/Src/bms_hw.c:19:6:BMS_HW_Balance_AllOff	8	static
+../Core/Src/bms_hw.c:20:6:BMS_HW_Balance_S1	16	static
+../Core/Src/bms_hw.c:21:6:BMS_HW_Balance_S2	16	static

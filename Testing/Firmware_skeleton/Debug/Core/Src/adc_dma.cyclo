@@ -1,0 +1,8 @@
+../Core/Src/adc_dma.c:54:13:gpio_analog_init	2
+../Core/Src/adc_dma.c:81:13:adc_set_sampling	3
+../Core/Src/adc_dma.c:97:13:adc_set_sequence	4
+../Core/Src/adc_dma.c:112:13:dma2_stream0_init	2
+../Core/Src/adc_dma.c:135:6:ADC_DMA_Init	2
+../Core/Src/adc_dma.c:156:6:ADC_DMA_Start	1
+../Core/Src/adc_dma.c:158:20:ADC_GetFrame	1
+../Core/Src/adc_dma.c:160:7:adc_raw_to_v	1

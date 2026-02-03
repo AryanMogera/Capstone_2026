@@ -1,0 +1,8 @@
+../Core/Src/main.c:10:13:clock_init_minimal	4	static
+../Core/Src/main.c:16:14:group_v_from_adc	16	static
+../Core/Src/main.c:17:14:temp_c_from_adc	16	static
+../Core/Src/main.c:18:14:curr_a_from_adc	16	static
+../Core/Src/main.c:20:13:send_telemetry	384	static
+../Core/Src/main.c:31:13:handle_cmd	24	static
+../Core/Src/main.c:61:5:main	248	static
+../Core/Src/main.c:124:6:USART2_IRQHandler	8	static

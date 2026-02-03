@@ -1,0 +1,3 @@
+../Core/Src/bms_balance.c:7:6:BAL_Init	1
+../Core/Src/bms_balance.c:12:6:BAL_Stop	1
+../Core/Src/bms_balance.c:17:6:BAL_Tick	9

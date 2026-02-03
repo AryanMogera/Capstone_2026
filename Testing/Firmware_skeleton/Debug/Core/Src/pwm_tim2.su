@@ -1,0 +1,6 @@
+../Core/Src/pwm_tim2.c:10:13:gpio_pwm_init	4	static
+../Core/Src/pwm_tim2.c:36:6:PWM_TIM2_Init	16	static
+../Core/Src/pwm_tim2.c:68:17:duty_to_ccr	16	static
+../Core/Src/pwm_tim2.c:74:6:PWM_TIM2_SetDuty_CH2	24	static
+../Core/Src/pwm_tim2.c:79:6:PWM_TIM2_SetDuty_CH3	24	static
+../Core/Src/pwm_tim2.c:84:6:PWM_TIM2_AllOff	4	static
