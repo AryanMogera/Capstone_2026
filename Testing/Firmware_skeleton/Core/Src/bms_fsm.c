@@ -1,197 +1,224 @@
 // bms_fsm.c
+
 #include "bms_fsm.h"
 #include "bms_config.h"
 #include "bms_hw.h"
 #include "bms_balance.h"
 #include <math.h>
 
-// balancing sub-fsm context
-static bal_ctx_t g_bal;
+static pb_ctx_t g_pb;						 // static only this file can access it. pb is passive balancing logic
 
-	/* This is our Emergency Stop button. It communicates with our hardware layer (bms_hw.h)
- 	 to physically disconnect the battery from both the charger and the load.
- 	 It also shuts down the balancing resistors to prevent heat buildup.*/
-
-static void all_off(void) {
-  BMS_HW_SetChargeEnable(false);
+static void all_off(void) { 				// emergency safe function to reuse in INIT, STANDBY, FAULT, and deep-discharge
+  BMS_HW_SetChargeEnable(false); 			//disable charge MOSFET and discharge MOSFET, and turns off all bleed resistors.
   BMS_HW_SetDischargeEnable(false);
-  BMS_HW_Balance_AllOff();
+  BMS_HW_Bleed_AllOff();
 }
-
-/*This function is the Safety Watch of our BMS. It continuously monitors
-the battery's health by comparing live sensor data against predefined limits.
-If any limit is crossed, it takes immediate action to protect the battery from damage or fire.*/
 
 static void check_faults(bms_ctx_t *c) {
-  // Over Voltage and Under Voltage
-  if (c->Vmax > OV_LIMIT_V) c->faults |= FAULT_OV;
-  if (c->Vmin < UV_LIMIT_V) c->faults |= FAULT_UV;
 
-  // Over Temperature
-  for (int i=0;i<8;i++) if (c->Tg[i] > OT_LIMIT_C) c->faults |= FAULT_OT;
+  float uv = (c->state == BMS_DEEP_DISCHARGE) ? DEEP_UV_LIMIT_V : UV_LIMIT_V;  //choose one
 
-  // Over Current (absolute)
-  if (fabsf(c->I) > OC_LIMIT_A) c->faults |= FAULT_OC;
+  if (c->Vmax > OV_LIMIT_V) c->faults |= FAULT_OV; 			//overvoltage fault limit
+  if (c->Vmin < uv) c->faults |= FAULT_UV;       			//undervoltage limit
 
-  if (c->faults) c->state = BMS_FAULT;		//If any of the above conditions were met, c->faults will no longer be zero.
-}
-/* 	Crucial Logic: Once the state is changed to BMS_FAULT,
-    other parts of code (like all_off()) will see this and physically disconnect the battery MOSFETs.
-  	This is a "latched" state, meaning even if the temperature cools down or the voltage stabilizes,
- 	the battery stays off until a human or a reset command clears the fault.
- */
+  for (int i = 0; i < 8; i++) {    							//loop through 8 temp and one current
+    if (c->Tg[i] > OT_LIMIT_C) c->faults |= FAULT_OT;		// if any temp is high set overtemp fault
+  }
 
-
-/*This function acts as the "Safety " for the balancing process.  Even if your cells are unbalanced,
- the BMS won't start bleeding off energy unless every single condition in this list is "Safe."
- It returns true only if it is both necessary and safe to balance.*/
-
-static bool balance_allowed(const bms_ctx_t *c) {
-  if (c->faults) return false;						//We dont want to engage balancing circuits while the main system is in fault
-  if (!c->cmd_balance_enable) return false;			//Checks if we have actually turned on the balancing feature
-  if (c->dV < DV_START_V) return false;				//dV is the difference between the highest and lowest cell, it only works when the gap exceeds DV_START_V
-  if (fabsf(c->I) > BAL_MAX_CURR_A) return false;	//BMS waits for the battery current to be low and stable before it tursts the voltage readings enough to start balancing
-  for (int i=0;i<8;i++) if (c->Tg[i] > BAL_MAX_TEMP_C) return false;	//if the battery is running hot, the BMS will refuse to balance to avoid adding heat to the pack
-  return true;				//if all these conditions are skipped, it finally returns true and givies the balancing FSM green light to start
+  if (fabsf(c->I) > OC_LIMIT_A) c->faults |= FAULT_OC;     //absolute value of current, set OC fault
+  if (c->faults) c->state = BMS_FAULT;					   //if there are any faults then force the fsm to BSM_FAULT
 }
 
-/*This function is the "Decision Maker" for the system.
-  Its job is to determine which operational state the BMS should enter
-  Its after it has finished taking its measurements.*/
+static bool balance_allowed(const bms_ctx_t *c) {           //checks if balance conditions are met
+  if (c->faults) return false;								// no faults
+  if (!c->cmd_balance_enable) return false;					//software comman to enable balance
 
-static bms_state_t mode_select(const bms_ctx_t *c) {
+  if (!c->charger_connected) return false;					// check charger is connected
 
-	// You can later detect charge/discharge from current sign etc.Currently,
-	//this function is set up for manual override. Instead of looking at sensors to guess what is happening,
-	//it looks for a direct command from you (the user) or a higher-level controller.
+  if (c->dV < DV_START_V) return false;     				//cell group voltage is toos small, no need to balance
+  if (fabsf(c->I) > BAL_MAX_CURR_A) return false;			//check if current is too high
 
-  if (c->cmd_force_mode == 1) return BMS_CHARGE;
+  for (int i = 0; i < 8; i++) {								// if temp is too high
+    if (c->Tg[i] > BAL_MAX_TEMP_C) return false;
+  }
+
+  return true;  											// only reaches here if all checks passed
+}
+
+static bool deep_done(const bms_ctx_t *c) {					//check if deep discharge is done when the highest group voltage is below a near-zero threshold.
+
+  return (c->Vmax <= DEEP_DONE_V);							// using VMAx ensures all groups are near zero, not just one
+}
+
+static bms_state_t mode_select(const bms_ctx_t *c) {		//returns which state the fsm should go to from MEASURE
+
+  if (c->cmd_force_mode == 1) return BMS_CHARGE;			// manual override, 1 = force charge, 2 = force discharge
   if (c->cmd_force_mode == 2) return BMS_DISCHARGE;
-  if (c->cmd_force_mode == 3) return BMS_DEEP_DISCHARGE;
-  return BMS_DISCHARGE; // default "normal"
+
+
+  if (c->cmd_deep_enable && c->deep_latched) return BMS_DEEP_DISCHARGE;  //deep discharge only if , deep enabled by command and 5 second button hold latch has
+
+
+  if (c->charger_connected) return BMS_CHARGE;  // charge mode if charger is connected
+  return BMS_DISCHARGE; 						// or else discharge
 }
 
-/*This is our Reset or Cold Boot function. Every time our microcontroller starts up,
-  this code runs once to ensure the software starts from a clean, safe, and known state.*/
+void BMS_Init(bms_ctx_t *c) {					// start fsm in init and clear faults
+  c->state = BMS_INIT;
+  c->faults = 0;
 
-void BMS_Init(bms_ctx_t *c) {
-  c->state = BMS_INIT;					//This places FSM at very first step
-  c->faults = 0;						//This clears all safety flags
-  for (int i=0;i<4;i++) c->Vg[i]=0;		//Sets the cell voltages to 0
-  for (int i=0;i<8;i++) c->Tg[i]=25;	//Sets ther temperatures to 25 Celsius as a safe placeholder
-  c->I=0;								//Sets the current to 0
-  c->Vmax=0; c->Vmin=0; c->dV=0;		//Resets the calculates statistics
+  for (int i = 0; i < 4; i++) c->Vg[i] = 0.0f;		//initialize 4 group voltages
+  for (int i = 0; i < 8; i++) c->Tg[i] = 25.0f;     //initialize tempt to a room temp value
+  c->I = 0.0f;										//
 
-  c->cmd_balance_enable = 0;			//Balancing is OFF by default
-  c->cmd_deep_enable = 0;				//Deep Discharge is OFF by default
-  c->cmd_force_mode = 0;				//The mode is auto/standby rather than forced to Charging and Discharging
+  c->Vmax = 0.0f;									//derived values
+  c->Vmin = 0.0f;
+  c->dV   = 0.0f;
 
-  BAL_Init(&g_bal);						//THis calls the initialization for the balancing logic itself
+  c->cmd_balance_enable = 1;						//no balancing, deep discharge or forced mode
+  c->cmd_deep_enable    = 1;
+  c->cmd_force_mode     = 0;
+
+  c->cmd_chg_force_en  = 0;
+  c->cmd_chg_force_val = 0;
+
+  c->charger_connected  = false;					//assume charger not connected, deep button not pressed
+  c->deep_button        = false;
+
+
+  c->deep_latched        = false;					//deep latch starts off false
+
+  PB_Init(&g_pb);									// inintialized balancing module context
 }
 
-/*This function is the Data Processor. It takes the raw numbers provided by our sensors and
- calculates the statistics that the rest of the FSM uses to make decisions.*/
-
-void BMS_UpdateDerived(bms_ctx_t *c) {		//TO find the extremes Vmax and Vmin
+void BMS_UpdateDerived(bms_ctx_t *c) {				//start with the first group voltage as max and min
   c->Vmax = c->Vg[0];
   c->Vmin = c->Vg[0];
-  for (int i=1;i<4;i++) {
+
+  for (int i = 1; i < 4; i++) {						// scan the remaining 3 group voltages and update max/min
     if (c->Vg[i] > c->Vmax) c->Vmax = c->Vg[i];
     if (c->Vg[i] < c->Vmin) c->Vmin = c->Vg[i];
   }
-  c->dV = c->Vmax - c->Vmin;
+
+  c->dV = c->Vmax - c->Vmin;						// compute voltage spread used for balancing decisions
 }
 
-
-
-void BMS_Step(bms_ctx_t *c, uint32_t now_ms) {
+void BMS_Step(bms_ctx_t *c, uint32_t now_ms) { 		//fsm advances based on current  c->state and now_ms is current time in milliseconds
   switch (c->state) {
+
     case BMS_INIT:
-      all_off();
-      BAL_Stop(&g_bal);
-      c->state = BMS_STANDBY;
+      all_off();									//ensures everything is off
+      PB_Stop(&g_pb);								// stop balancing logic
+      c->state = BMS_STANDBY;						// move to standby next
       break;
 
     case BMS_STANDBY:
-      // low activity waiting; you can add a wake condition
-      all_off();
-      c->state = BMS_MEASURE;
+      all_off();									//still keep everything off
+      c->state = BMS_MEASURE;						//next go measure and decide what to do
       break;
 
     case BMS_MEASURE:
-      BMS_UpdateDerived(c);
-      check_faults(c);
+      BMS_UpdateDerived(c);							//update max/min/spread
+      check_faults(c);								//check safety faults; if fault then stop here
       if (c->state == BMS_FAULT) break;
 
-      // After measure, choose mode
-      c->state = mode_select(c);
+      c->state = mode_select(c);					//otherwise choose the next mode
       break;
 
     case BMS_CHARGE:
-      // "enforce charge current limit - stop/limit at OV/OT/OC"
-      BMS_HW_SetChargeEnable(true);
-      BMS_HW_SetDischargeEnable(false);
 
+      BMS_HW_Bleed_AllOff();						// bleed resistors only in balance state
+
+      BMS_HW_SetChargeEnable(true);					//turn on charge path
+      BMS_HW_SetDischargeEnable(false);				// turn off discharge path
+
+      BMS_UpdateDerived(c);							//recompute derived values and recheck safety
       check_faults(c);
       if (c->state == BMS_FAULT) break;
 
-      if (balance_allowed(c)) c->state = BMS_BALANCE;
-      else c->state = BMS_MEASURE;
+      if (balance_allowed(c)) c->state = BMS_BALANCE; // go to balance if balancing is allowed
+      else c->state = BMS_MEASURE; 						//otherwise measure
       break;
 
     case BMS_DISCHARGE:
-      // "enforce discharge current limit - normal UV cutoff"
-      BMS_HW_SetChargeEnable(false);
-      BMS_HW_SetDischargeEnable(true);
 
+      BMS_HW_Bleed_AllOff();						//again ensure bleed is off outside balance
+
+      BMS_HW_SetChargeEnable(false);				//turn of charge
+      BMS_HW_SetDischargeEnable(true);				//turn on discharge
+
+      BMS_UpdateDerived(c);							//update plus check faults
       check_faults(c);
       if (c->state == BMS_FAULT) break;
 
-      // optional deep-discharge path
-      if (c->cmd_deep_enable && (c->Vmin < UV_LIMIT_V)) c->state = BMS_DEEP_DISCHARGE;
-      else if (balance_allowed(c)) c->state = BMS_BALANCE;
-      else c->state = BMS_MEASURE;
+      c->state = BMS_MEASURE;						// then go back to measure and decide again
       break;
 
     case BMS_DEEP_DISCHARGE:
-      // "controlled discharge toward 0V - hard safety stop"
-      if (!c->cmd_deep_enable) { c->state = BMS_MEASURE; break; }
 
-      BMS_HW_SetChargeEnable(false);
-      BMS_HW_SetDischargeEnable(true);
+      BMS_HW_Bleed_AllOff();						// bleed off unless in balance
 
-      // hard stop (safety)
-      if (c->Vmin < DEEP_UV_LIMIT_V) {
-        c->faults |= FAULT_UV;
-        c->state = BMS_FAULT;
+
+      if (!(c->cmd_deep_enable && c->deep_latched)) { //if deep mode is disabled or latch is unset, deep discharge is cancelled
+        all_off();										//turn off everything
+        c->state = BMS_MEASURE;							//return to measure
         break;
       }
 
-      check_faults(c);
+
+      BMS_HW_SetChargeEnable(false);  					//main discharge pathh on
+      BMS_HW_SetDischargeEnable(true);
+
+
+      BMS_UpdateDerived(c);								//keep Vmax,Vmin, dV updated
+
+
+      if (c->I > DEEP_MAX_CURR_A) {						//deep mode specific overcurrent limit
+        c->faults |= FAULT_OC;							//notice check only positive current discharge directions
+        c->state  = BMS_FAULT;
+        break;
+      }
+
+
+      if (deep_done(c)) {								// if near - zero reached then shut everything off
+        all_off();
+        c->deep_latched = false;						//clear deep latch so it wont restart without anaother 5 s hold
+        c->state = BMS_STANDBY;							// go to standby
+        break;
+      }
+
+
+      check_faults(c);									//fault check
       if (c->state == BMS_FAULT) break;
 
-      c->state = BMS_MEASURE;
-      break;
+
+      break;											//stain deep until done  or cancel or fault
 
     case BMS_BALANCE: {
-      // balancing sub-FSM
-      bool en = balance_allowed(c);
-      BAL_Tick(&g_bal, now_ms, en);
 
-      // stop when dV small
-      if (c->dV <= DV_STOP_V) {
-        BAL_Stop(&g_bal);
-        c->state = BMS_MEASURE;
-      } else {
-        c->state = BMS_MEASURE;
-      }
+      BMS_HW_SetChargeEnable(true);						//balance is charge only so ti keeps charge path enabled.
+      BMS_HW_SetDischargeEnable(false);
+
+      BMS_UpdateDerived(c);								//update plus check faults
+      check_faults(c);
+      if (c->state == BMS_FAULT) { PB_Stop(&g_pb); break; } //break if faulted
+
+      bool en = balance_allowed(c);							//recheck if balance is allowed right now
+      PB_Tick(&g_pb, c->Vg, c->Vmin, c->dV, now_ms, en);    // run one balance tick
+
+
+      c->state = BMS_MEASURE; 								//afteer balance tick go to measure
     } break;
 
-    case BMS_FAULT:
-      // latch + log; all off
+    case BMS_FAULT:											// if faulted then turn of everything and stop balance
       all_off();
-      BAL_Stop(&g_bal);
-      // stays latched until reset command (you can add one)
+      PB_Stop(&g_pb);
+
+      break;
+
+    default:												//should never happen
+      c->faults |= FAULT_SENSOR;							// invalid state values appears then move to fault
+      c->state = BMS_FAULT;
       break;
   }
 }
