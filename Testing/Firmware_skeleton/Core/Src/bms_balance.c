@@ -1,58 +1,68 @@
-// bms_balance.c
 #include "bms_balance.h"
 #include "bms_hw.h"
 #include "bms_config.h"
-#include "timebase.h"
 
-void BAL_Init(bal_ctx_t *b) {
-  b->st = BAL_IDLE;
-  b->t_mark_ms = 0;
+#define PB_ON_MS   300u
+#define PB_OFF_MS   80u
+
+static uint8_t pick_high_cell(const float Vg[4]) {
+  uint8_t imax = 0;
+  float vmax = Vg[0];
+  for (uint8_t i=1;i<4;i++){
+    if (Vg[i] > vmax) { vmax = Vg[i]; imax = i; }
+  }
+  return imax;
 }
 
-void BAL_Stop(bal_ctx_t *b) {
-  b->st = BAL_IDLE;
-  BMS_HW_Balance_AllOff();
+void PB_Init(pb_ctx_t *p) {
+  p->st = PB_IDLE;
+  p->t_mark_ms = 0;
+  p->cell_on = 0xFF;
 }
 
-void BAL_Tick(bal_ctx_t *b, uint32_t now_ms, bool enable) {
-  if (!enable) { BAL_Stop(b); return; }
+void PB_Stop(pb_ctx_t *p) {
+  p->st = PB_IDLE;
+  p->cell_on = 0xFF;
+  BMS_HW_Bleed_AllOff();
+}
 
-  switch (b->st) {
-    case BAL_IDLE:
-      // pick high/low groups (later). For now just run S1/S2 waveform.
-      b->st = BAL_CHARGE_CAP;
-      b->t_mark_ms = now_ms;
-      break;
+void PB_Tick(pb_ctx_t *p, const float Vg[4], float Vmin, float dV,
+             uint32_t now_ms, bool enable) {
+  if (!enable) { PB_Stop(p); return; }
 
-    case BAL_CHARGE_CAP:
-      // S1 ON (PWM), S2 OFF
-      BMS_HW_Balance_S1(50);
-      BMS_HW_Balance_S2(0);
-      if ((now_ms - b->t_mark_ms) >= BAL_TCHARGE_MS) {
-        b->st = BAL_DEADTIME;
-        b->t_mark_ms = now_ms;
-        BMS_HW_Balance_AllOff();
-        delay_us(BAL_DEAD_US);
+  // if already balanced enough, stop
+  if (dV <= DV_STOP_V) { PB_Stop(p); return; }
+
+  switch (p->st) {
+    case PB_IDLE: {
+      // only start bleeding when we truly need it
+      if (dV < DV_START_V) { BMS_HW_Bleed_AllOff(); return; }
+
+      p->cell_on = pick_high_cell(Vg);
+
+
+      if ((Vg[p->cell_on] - Vmin) < DV_START_V) {
+        BMS_HW_Bleed_AllOff();
+        return;
+      }
+
+      BMS_HW_Bleed_AllOff();
+      BMS_HW_Bleed_Set(p->cell_on, true);
+      p->t_mark_ms = now_ms;
+      p->st = PB_BLEED_ON;
+    } break;
+
+    case PB_BLEED_ON:
+      if ((now_ms - p->t_mark_ms) >= PB_ON_MS) {
+        BMS_HW_Bleed_AllOff();
+        p->t_mark_ms = now_ms;
+        p->st = PB_REST;
       }
       break;
 
-    case BAL_DEADTIME:
-      // both off already
-      if ((now_ms - b->t_mark_ms) >= 1) { // small spacing
-        b->st = BAL_DISCHARGE_CAP;
-        b->t_mark_ms = now_ms;
-      }
-      break;
-
-    case BAL_DISCHARGE_CAP:
-      // S2 ON (PWM), S1 OFF
-      BMS_HW_Balance_S1(0);
-      BMS_HW_Balance_S2(50);
-      if ((now_ms - b->t_mark_ms) >= BAL_TDISCH_MS) {
-        b->st = BAL_IDLE;
-        b->t_mark_ms = now_ms;
-        BMS_HW_Balance_AllOff();
-        delay_us(BAL_DEAD_US);
+    case PB_REST:
+      if ((now_ms - p->t_mark_ms) >= PB_OFF_MS) {
+        p->st = PB_IDLE;
       }
       break;
   }
