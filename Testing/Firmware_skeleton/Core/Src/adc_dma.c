@@ -24,31 +24,33 @@
 
 /* ADC Control Register Bits */
 #define ADC_CR_2_ADON      	(1U << 0)
-#define ADC_CR2_CONT      	(1U << 1)
-#define ADC_CR2_DMA       	(1U << 8)
-#define ADC_CR2_DDS       	(1U << 9)
-#define ADC__CR2_SWSTART   	(1U << 30)
-#define ADC_CR1_SCAN      	(1U << 8) // CR1N
+#define ADC_CR_2_CONT      	(1U << 1)
+#define ADC_CR_2_DMA       	(1U << 8)
+#define ADC_CR_2_DDS       	(1U << 9)
+#define ADC_CR2_SWSTART   	(1U << 30)
+#define ADC_CR_1_SCAN      	(1U << 8) // CR1N
 
 static adc_frame_t g_adc;
 
 // ADC channel order (DMA buffer indexes)
-// Voltage 1-4, Temperature 1-8, Current 1
+// Voltage 1-4, Temperature 1-8, Current 1, CHG_DET
 
 static const uint8_t g_seq[ADC_CH_COUNT] = {
-  0,   // V1: PA0  ADC123_IN0
-  1,   // V2: PA1  ADC123_IN1
-  4,   // V3: PA4  ADC12_IN4
-  8,   // V4: PB0  ADC12_IN8
-  11,  // T1: PC1  ADC123_IN11
-  10,  // T2: PC0  ADC123_IN10
-  12,  // T3: PC2  ADC123_IN12
-  13,  // T4: PC3  ADC123_IN13
-  14,  // T5: PC4  ADC12_IN14
-  15,  // T6: PC5  ADC12_IN15
-  9,   // T7: PB1  ADC12_IN9
-  6,   // T8: PA6  ADC12_IN6
-  5    // I1: PA5  ADC12_IN5
+  0,   // V1: 		PA0  ADC123_IN0
+  1,   // V2: 		PA1  ADC123_IN1
+  4,   // V3: 		PA4  ADC12_IN4
+  8,   // V4: 		PB0  ADC12_IN8
+  11,  // T1: 		PC1  ADC123_IN11
+  10,  // T2: 		PC0  ADC123_IN10
+  12,  // T3: 		PC2  ADC123_IN12
+  13,  // T4: 		PC3  ADC123_IN13
+  14,  // T5: 		PC4  ADC12_IN14
+  15,  // T6: 		PC5  ADC12_IN15
+  9,   // T7: 		PB1  ADC12_IN9
+  6,   // T8: 		PA6  ADC12_IN6
+  5,   // I1: 		PA5  ADC12_IN5
+  7	   //CHG_DET  	PA7	 ADC12_IN7
+
 };
 
 static void gpio_analog_init(void) {
@@ -62,8 +64,8 @@ static void gpio_analog_init(void) {
 
   // PA0,PA1,PA4,PA5,PA6 analog
 
-  GPIOA->MODER |= 	(3U<<(0*2)) | (3U<<(1*2)) | (3U<<(4*2)) | (3U<<(5*2)) | (3U<<(6*2));
-  GPIOA->PUPDR &=~	((3U<<(0*2))|(3U<<(1*2))|(3U<<(4*2))|(3U<<(5*2))|(3U<<(6*2)));
+  GPIOA->MODER |= 	(3U<<(0*2)) |(3U<<(1*2))|(3U<<(4*2))|(3U<<(5*2))|(3U<<(6*2)) |(3U<<(7*2));
+  GPIOA->PUPDR &=~	((3U<<(0*2))|(3U<<(1*2))|(3U<<(4*2))|(3U<<(5*2))|(3U<<(6*2)) |(3U<<(7*2)));
 
   // PB0,PB1 analog
 
@@ -124,7 +126,7 @@ static void dma2_stream0_init(uint16_t *dst, uint32_t count) {
   DMA2_Stream0->NDTR = count;				 //Sets the Number of Data Items to transfer (13 in our case).
 
   // Configure behaviour
-  DMA2_Stream0->CR &=~	((3U<<11) | (3U<<13) | (3U<<16)); 	// clear PSIZE, MSIZE, PL
+  DMA2_Stream0->CR &=~	((3U<<11) | (3U<<13) | (3U<<16)); 		// clear PSIZE, MSIZE, PL
   DMA2_Stream0->CR = DMA_CIRC | DMA_MINC | DMA_PSIZE_16 | DMA_MSIZE_16 | DMA_PL_MED;
 
   // 6. Enable stream
@@ -133,23 +135,23 @@ static void dma2_stream0_init(uint16_t *dst, uint32_t count) {
 }
 
 void ADC_DMA_Init(void) {
-  gpio_analog_init();		//Calls our function to set the physical pins to Analog mode so they can "see" voltages.
+  gpio_analog_init();			//Calls our function to set the physical pins to Analog mode so they can "see" voltages.
 
   RCC->APB2ENR |= ADC1EN;		//Enables the clock for the ADC1 peripheral
 
-  ADC1->CR1 = 0;		//This clears the Control Registers to a known "zero" state
-  ADC1->CR2 = 0;		//This clears the Control Registers to a known "zero" state
+  ADC1->CR1 = 0;				//This clears the Control Registers to a known "zero" state
+  ADC1->CR2 = 0;				//This clears the Control Registers to a known "zero" state
 
-  ADC1->CR1 |= ADC_CR1_SCAN;				//tells the ADC to measure a group of channels one after another, rather than just stopping after the first pin
-  ADC1->CR2 |= ADC_CR2_CONT;				//tells the ADC to start over automatically once it finishes the last channel in the list. This creates a never-ending loop of measurements
-  ADC1->CR2 |= ADC_CR2_DMA | ADC_CR2_DDS;	//Enables the DMA interface so the ADC can "talk" to the DMA controller
+  ADC1->CR1 |= ADC_CR_1_SCAN;				//tells the ADC to measure a group of channels one after another, rather than just stopping after the first pin
+  ADC1->CR2 |= ADC_CR_2_CONT;				//tells the ADC to start over automatically once it finishes the last channel in the list. This creates a never-ending loop of measurements
+  ADC1->CR2 |= ADC_CR_2_DMA | ADC_CR_2_DDS;	//Enables the DMA interface so the ADC can "talk" to the DMA controller
 
   adc_set_sampling();						//Sets the "look time" (84 cycles in our case) for each channel
   adc_set_sequence(g_seq, ADC_CH_COUNT);	//Tells the ADC exactly which pins to measure and in what order
 
   dma2_stream0_init(g_adc.raw, ADC_CH_COUNT);	//Sets up the DMA to stand by. It is now waiting for the ADC to finish a conversion so it can move the result into g_adc.raw array.
 
-  ADC1->CR2 |= ADC_CR2_ADON;		//wakes up the ADC from its power-down state
+  ADC1->CR2 |= ADC_CR_2_ADON;		//wakes up the ADC from its power-down state
   for (volatile int i=0;i<1000;i++) { __NOP(); }
 }
 
