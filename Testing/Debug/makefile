@@ -34,34 +34,34 @@ $(wildcard ../makefile.init) \
 $(wildcard ../makefile.targets) \
 
 
-BUILD_ARTIFACT_NAME := Firmware_skeleton
+BUILD_ARTIFACT_NAME := Testing
 BUILD_ARTIFACT_EXTENSION := elf
 BUILD_ARTIFACT_PREFIX :=
 BUILD_ARTIFACT := $(BUILD_ARTIFACT_PREFIX)$(BUILD_ARTIFACT_NAME)$(if $(BUILD_ARTIFACT_EXTENSION),.$(BUILD_ARTIFACT_EXTENSION),)
 
 # Add inputs and outputs from these tool invocations to the build variables 
 EXECUTABLES += \
-Firmware_skeleton.elf \
+Testing.elf \
 
 MAP_FILES += \
-Firmware_skeleton.map \
+Testing.map \
 
 SIZE_OUTPUT += \
 default.size.stdout \
 
 OBJDUMP_LIST += \
-Firmware_skeleton.list \
+Testing.list \
 
 
 # All Target
 all: main-build
 
 # Main-build Target
-main-build: Firmware_skeleton.elf secondary-outputs
+main-build: Testing.elf secondary-outputs
 
 # Tool invocations
-Firmware_skeleton.elf Firmware_skeleton.map: $(OBJS) $(USER_OBJS) /Users/aryanmogera/STM32CubeIDE/workspace_1.19.0/Firmware_skeleton/STM32F446RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "Firmware_skeleton.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"/Users/aryanmogera/STM32CubeIDE/workspace_1.19.0/Firmware_skeleton/STM32F446RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Firmware_skeleton.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
+Testing.elf Testing.map: $(OBJS) $(USER_OBJS) /Users/aryanmogera/Desktop/Capstone_2026/Testing/STM32F401RCTX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "Testing.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"/Users/aryanmogera/Desktop/Capstone_2026/Testing/STM32F401RCTX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Testing.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -u _scanf_float -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
@@ -70,14 +70,14 @@ default.size.stdout: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
 	@echo 'Finished building: $@'
 	@echo ' '
 
-Firmware_skeleton.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "Firmware_skeleton.list"
+Testing.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "Testing.list"
 	@echo 'Finished building: $@'
 	@echo ' '
 
 # Other Targets
 clean:
-	-$(RM) Firmware_skeleton.elf Firmware_skeleton.list Firmware_skeleton.map default.size.stdout
+	-$(RM) Testing.elf Testing.list Testing.map default.size.stdout
 	-@echo ' '
 
 secondary-outputs: $(SIZE_OUTPUT) $(OBJDUMP_LIST)

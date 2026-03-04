@@ -1,25 +1,22 @@
 //bms_balance.h
-#ifndef BMS_BALANCE_H_
-#define BMS_BALANCE_H_
 
-#include <stdint.h>
+#pragma once
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef enum {
-  BAL_IDLE=0,
-  BAL_CHARGE_CAP,
-  BAL_DEADTIME,
-  BAL_DISCHARGE_CAP
-} bal_state_t;
+  PB_IDLE = 0,
+  PB_BLEED_ON,
+  PB_REST,
+} pb_state_t;
 
 typedef struct {
-  bal_state_t st;
+  pb_state_t st;
   uint32_t t_mark_ms;
-} bal_ctx_t;
+  uint8_t cell_on;   // 0..3, 0xFF = none
+} pb_ctx_t;
 
-void BAL_Init(bal_ctx_t *b);
-void BAL_Stop(bal_ctx_t *b);
-void BAL_Tick(bal_ctx_t *b, uint32_t now_ms, bool enable);
-
-
-#endif /* BMS_BALANCE_H_ */
+void PB_Init(pb_ctx_t *p);
+void PB_Stop(pb_ctx_t *p);
+void PB_Tick(pb_ctx_t *p, const float Vg[4], float Vmin, float dV,
+             uint32_t now_ms, bool enable);
