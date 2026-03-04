@@ -3,7 +3,6 @@
 "./Core/Src/bms_fsm.o"
 "./Core/Src/bms_hw.o"
 "./Core/Src/main.o"
-"./Core/Src/pwm_tim2.o"
 "./Core/Src/stm32f4xx_hal_msp.o"
 "./Core/Src/stm32f4xx_it.o"
 "./Core/Src/syscalls.o"

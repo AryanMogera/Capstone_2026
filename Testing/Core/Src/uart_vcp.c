@@ -9,6 +9,8 @@ static volatile uint16_t rx_w = 0, rx_r = 0;
 static inline uint16_t rb_next(uint16_t x){ return (uint16_t)((x + 1u) % RX_BUF_SZ); }
 
 
+/*This function is the Inbox Manager.
+  It is called every time the UART hardware receives a new byte from your computer.*/
 
 static void rb_push(uint8_t b){
   uint16_t nw = rb_next(rx_w);
